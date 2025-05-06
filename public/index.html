@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Instagram Auto Welcome API</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #333;
+        }
+
+        h1 {
+            color: #405DE6;
+            text-align: center;
+        }
+
+        .container {
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin: 10px 0 5px;
+            font-weight: bold;
+        }
+
+        textarea,
+        input {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        button {
+            background-color: #405DE6;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            background-color: #5851DB;
+        }
+
+        #result {
+            background-color: #f9f9f9;
+            border-left: 4px solid #405DE6;
+            padding: 15px;
+            margin-top: 20px;
+            white-space: pre-wrap;
+            overflow-x: auto;
+            display: none;
+        }
+
+        .status {
+            font-weight: bold;
+            margin-top: 10px;
+        }
+
+        .success {
+            color: #28a745;
+        }
+
+        .error {
+            color: #dc3545;
+        }
+
+        .note {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Instagram Auto Welcome API</h1>
+
+    <div class="container">
+        <h2>Process New Followers</h2>
+        <form id="processForm">
+            <label for="cookieContent">Instagram Cookies (JSON format):</label>
+            <textarea id="cookieContent" rows="8"
+                placeholder='[{"name":"cookie_name","value":"cookie_value","domain":".instagram.com","path":"/","secure":true,"httpOnly":true,"expirationDate":1234567890}]'
+                required></textarea>
+            <div class="note">Paste your Instagram cookies in JSON format. Export them from your browser or use a cookie
+                extension.</div>
+
+            <label for="username">Instagram Username:</label>
+            <input type="text" id="username" placeholder="your_instagram_username" required>
+
+            <label for="welcomeMessage">Welcome Message:</label>
+            <textarea id="welcomeMessage" rows="4"
+                placeholder="Thank you for following us! We appreciate your support."></textarea>
+            <div class="note">If left empty, the default message from your server configuration will be used.</div>
+
+            <button type="submit">Process Followers</button>
+        </form>
+
+        <div id="status" class="status"></div>
+        <pre id="result"></pre>
+    </div>
+
+    <script>
+        document.getElementById('processForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            const statusEl = document.getElementById('status');
+            const resultEl = document.getElementById('result');
+
+            statusEl.className = 'status';
+            statusEl.textContent = 'Processing...';
+            resultEl.style.display = 'none';
+
+            try {
+                // Parse the cookie content as JSON
+                let cookieContent;
+                try {
+                    cookieContent = JSON.parse(document.getElementById('cookieContent').value);
+                } catch (err) {
+                    throw new Error('Invalid JSON format for cookies');
+                }
+
+                const username = document.getElementById('username').value;
+                const welcomeMessage = document.getElementById('welcomeMessage').value;
+
+                const response = await fetch('/api/process-followers', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        cookieContent,
+                        username,
+                        welcomeMessage: welcomeMessage || undefined // Only send if not empty
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    statusEl.className = 'status success';
+                    statusEl.textContent = 'Success! Processed followers:';
+                } else {
+                    statusEl.className = 'status error';
+                    statusEl.textContent = 'Error: ' + (data.message || 'Unknown error');
+                }
+
+                resultEl.textContent = JSON.stringify(data, null, 2);
+                resultEl.style.display = 'block';
+            } catch (error) {
+                statusEl.className = 'status error';
+                statusEl.textContent = 'Error: ' + error.message;
+
+                resultEl.textContent = error.toString();
+                resultEl.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+
+</html>
