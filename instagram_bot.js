@@ -574,7 +574,163 @@ async function markUserAsProcessed(collection, followerUsername, accountOwner) {
 }
 
 /**
- * Process followers - main function exposed to API
+ * Process followers - Immediate return version that returns a job ID
+ */
+function startProcessFollowers(options, jobManager) {
+    const jobId = jobManager.createJob(options);
+
+    // Start processing in the background
+    processFollowersJob(options, jobId, jobManager)
+        .catch(error => {
+            console.error(`Job ${jobId} failed:`, error);
+            jobManager.failJob(jobId, error.message);
+        });
+
+    return jobId;
+}
+
+/**
+ * Process followers job - runs in the background
+ */
+async function processFollowersJob(options, jobId, jobManager) {
+    const {
+        cookieFilePath,
+        cookieFile, // Buffer or file object
+        username,
+        welcomeMessage = process.env.WELCOME_MESSAGE || 'Thank you for following us!',
+        headless = true,
+        browserlessApiKey // browserless.io API key
+    } = options;
+
+    let client, browser;
+    const processedUsers = [];
+    const failedUsers = [];
+
+    // Update job status to running
+    jobManager.updateJobStatus(jobId, 'running');
+
+    // Set up browserless.io endpoint if API key is provided
+    let browserlessWSEndpoint = null;
+    if (browserlessApiKey) {
+        browserlessWSEndpoint = `wss://chrome.browserless.io?token=${browserlessApiKey}`;
+        console.log(`[Job ${jobId}] Using browserless.io service`);
+    }
+
+    try {
+        // Load cookies
+        let cookies;
+        if (cookieFile) {
+            console.log(`[Job ${jobId}] Loading cookies from uploaded file`);
+            cookies = loadCookies(cookieFile);
+        } else if (cookieFilePath) {
+            console.log(`[Job ${jobId}] Loading cookies from ${cookieFilePath}`);
+            cookies = loadCookies(cookieFilePath);
+        } else {
+            throw new Error('No cookie file or path provided');
+        }
+
+        // Connect to MongoDB
+        const mongo = await connectToMongoDB();
+        client = mongo.client;
+        const collection = mongo.collection;
+
+        // Initialize browser (support browserless.io)
+        jobManager.updateJobStatus(jobId, 'initializing_browser');
+        const browserObj = await initBrowser(cookies, headless, browserlessWSEndpoint);
+        browser = browserObj.browser;
+        const page = browserObj.page;
+
+        // Check if we're successfully logged in
+        await page.goto('https://www.instagram.com/', { waitUntil: 'networkidle2' });
+
+        const isLoggedIn = await page.evaluate(() => {
+            return !document.querySelector('input[name="username"]');
+        });
+
+        if (!isLoggedIn) {
+            console.error('[Job ${jobId}] Not logged in. Please check your cookies.');
+            throw new Error('Authentication failed - please check your cookie file');
+        }
+
+        console.log(`[Job ${jobId}] Successfully logged in to Instagram`);
+
+        // Get the account owner username
+        const accountOwner = username;
+        console.log(`[Job ${jobId}] Processing followers for Instagram account: ${accountOwner}`);
+
+        // Check notifications and get new followers
+        jobManager.updateJobStatus(jobId, 'checking_notifications');
+        const newFollowers = await checkNotifications(page, collection, accountOwner);
+
+        // Update job with total count
+        jobManager.setTotalFollowers(jobId, newFollowers.length);
+
+        if (newFollowers.length === 0) {
+            jobManager.updateJobStatus(jobId, 'completed', {
+                message: 'No new followers to process'
+            });
+            return { processedUsers, failedUsers };
+        }
+
+        // Send welcome messages to new followers
+        jobManager.updateJobStatus(jobId, 'sending_messages');
+
+        for (const username of newFollowers) {
+            console.log(`[Job ${jobId}] Processing follower: ${username}`);
+
+            const success = await sendWelcomeMessage(page, username, welcomeMessage);
+
+            if (success) {
+                await markUserAsProcessed(collection, username, accountOwner);
+                const userData = {
+                    username,
+                    status: 'success',
+                    timestamp: new Date().toISOString()
+                };
+                processedUsers.push(userData);
+                jobManager.addProcessedUser(jobId, userData);
+            } else {
+                console.log(`[Job ${jobId}] Failed to message ${username}, skipping this user`);
+                const userData = {
+                    username,
+                    status: 'failed',
+                    timestamp: new Date().toISOString()
+                };
+                failedUsers.push(userData);
+                jobManager.addFailedUser(jobId, userData);
+            }
+
+            // Add a delay between messages to avoid rate limiting
+            await sleep(5000 + Math.floor(Math.random() * 5000));
+        }
+
+        console.log(`[Job ${jobId}] Task completed successfully`);
+
+        jobManager.completeJob(jobId, {
+            processedUsers,
+            failedUsers
+        });
+
+        return { processedUsers, failedUsers };
+    } catch (error) {
+        console.error(`[Job ${jobId}] Error in processing followers:`, error);
+        jobManager.failJob(jobId, error.message);
+        throw error;
+    } finally {
+        // Clean up
+        if (browser) {
+            console.log(`[Job ${jobId}] Closing browser`);
+            await browser.close();
+        }
+        if (client) {
+            console.log(`[Job ${jobId}] Closing MongoDB connection`);
+            await client.close();
+        }
+    }
+}
+
+/**
+ * Original synchronous process followers function (for backward compatibility)
  */
 async function processFollowers(options) {
     const {
@@ -680,5 +836,7 @@ async function processFollowers(options) {
 }
 
 module.exports = {
-    processFollowers
+    processFollowers,
+    startProcessFollowers,
+    processFollowersJob
 };
