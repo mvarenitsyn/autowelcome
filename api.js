@@ -2,6 +2,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const fs = require('fs');
 const path = require('path');
+const multer = require('multer');
 const instagramBot = require('./instagram_bot');
 const dotenv = require('dotenv');
 
@@ -10,6 +11,12 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Set up multer for file uploads
+const upload = multer({
+    dest: 'uploads/',
+    limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+});
 
 // Middleware
 app.use(bodyParser.json());
@@ -21,14 +28,15 @@ app.get('/', (req, res) => {
 });
 
 // API endpoint to process new followers
-app.post('/api/process-followers', async (req, res) => {
+app.post('/api/process-followers', upload.single('cookieFile'), async (req, res) => {
     try {
-        const { cookieFilePath, username, welcomeMessage } = req.body;
+        const { username, welcomeMessage, browserlessApiKey } = req.body;
 
-        if (!cookieFilePath) {
+        // Check for cookie file upload
+        if (!req.file) {
             return res.status(400).json({
                 success: false,
-                message: 'Cookie file path is required'
+                message: 'Cookie file upload is required'
             });
         }
 
@@ -41,11 +49,15 @@ app.post('/api/process-followers', async (req, res) => {
 
         // Process followers
         const result = await instagramBot.processFollowers({
-            cookieFilePath,
+            cookieFile: req.file,
             username,
             welcomeMessage: welcomeMessage || process.env.WELCOME_MESSAGE || 'Thank you for following us!',
-            headless: true // Default to headless mode
+            headless: true, // Default to headless mode
+            browserlessApiKey: browserlessApiKey || process.env.BROWSERLESS_API_KEY
         });
+
+        // Clean up uploaded file after processing
+        fs.unlinkSync(req.file.path);
 
         res.json({
             success: true,

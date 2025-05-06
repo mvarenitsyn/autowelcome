@@ -42,11 +42,20 @@ async function connectToMongoDB() {
 }
 
 /**
- * Load cookies from a JSON file
+ * Load cookies from a JSON file or buffer
  */
-function loadCookies(cookieFilePath) {
+function loadCookies(cookieInput) {
     try {
-        const cookiesString = fs.readFileSync(cookieFilePath, 'utf8');
+        let cookiesString;
+        if (Buffer.isBuffer(cookieInput)) {
+            cookiesString = cookieInput.toString('utf8');
+        } else if (typeof cookieInput === 'string' && fs.existsSync(cookieInput)) {
+            cookiesString = fs.readFileSync(cookieInput, 'utf8');
+        } else if (typeof cookieInput === 'object' && cookieInput !== null && cookieInput.buffer) {
+            cookiesString = Buffer.from(cookieInput.buffer).toString('utf8');
+        } else {
+            throw new Error('Invalid cookie input');
+        }
         const cookies = JSON.parse(cookiesString);
 
         // Transform cookies into tough-cookie format
@@ -68,35 +77,42 @@ function loadCookies(cookieFilePath) {
             );
         });
 
-        console.log(`Loaded ${cookies.length} cookies from ${cookieFilePath}`);
+        console.log(`Loaded ${cookies.length} cookies from ${cookieInput}`);
         return { cookieJar, rawCookies: cookies };
     } catch (error) {
-        console.error(`Error loading cookies from ${cookieFilePath}:`, error);
+        console.error(`Error loading cookies from ${cookieInput}:`, error);
         throw error;
     }
 }
 
 /**
- * Initialize browser with cookies
+ * Initialize browser with cookies, supports browserless.io
  */
-async function initBrowser(cookiesObj, headless = true) {
-    const browser = await puppeteer.launch({
-        headless: headless ? 'new' : false,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--window-size=1280,800',
-            // Following options improve performance in browserless environments
-            '--disable-gpu',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--single-process',
-            '--disable-extensions'
-        ],
-        defaultViewport: { width: 1280, height: 800 }
-    });
+async function initBrowser(cookiesObj, headless = true, browserWSEndpoint = null) {
+    let browser;
+    if (browserWSEndpoint) {
+        browser = await puppeteer.connect({
+            browserWSEndpoint,
+            defaultViewport: { width: 1280, height: 800 }
+        });
+    } else {
+        browser = await puppeteer.launch({
+            headless: headless ? 'new' : false,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--window-size=1280,800',
+                '--disable-gpu',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process',
+                '--disable-extensions'
+            ],
+            defaultViewport: { width: 1280, height: 800 }
+        });
+    }
 
     const page = await browser.newPage();
 
@@ -532,27 +548,44 @@ async function markUserAsProcessed(collection, followerUsername, accountOwner) {
 async function processFollowers(options) {
     const {
         cookieFilePath,
+        cookieFile, // Buffer or file object
         username,
         welcomeMessage = process.env.WELCOME_MESSAGE || 'Thank you for following us!',
-        headless = true
+        headless = true,
+        browserlessApiKey // browserless.io API key
     } = options;
 
     let client, browser;
     const processedUsers = [];
     const failedUsers = [];
 
+    // Set up browserless.io endpoint if API key is provided
+    let browserlessWSEndpoint = null;
+    if (browserlessApiKey) {
+        browserlessWSEndpoint = `wss://chrome.browserless.io?token=${browserlessApiKey}`;
+        console.log('Using browserless.io service');
+    }
+
     try {
         // Load cookies
-        console.log(`Loading cookies from ${cookieFilePath}`);
-        const cookies = loadCookies(cookieFilePath);
+        let cookies;
+        if (cookieFile) {
+            console.log(`Loading cookies from uploaded file`);
+            cookies = loadCookies(cookieFile);
+        } else if (cookieFilePath) {
+            console.log(`Loading cookies from ${cookieFilePath}`);
+            cookies = loadCookies(cookieFilePath);
+        } else {
+            throw new Error('No cookie file or path provided');
+        }
 
         // Connect to MongoDB
         const mongo = await connectToMongoDB();
         client = mongo.client;
         const collection = mongo.collection;
 
-        // Initialize browser
-        const browserObj = await initBrowser(cookies, headless);
+        // Initialize browser (support browserless.io)
+        const browserObj = await initBrowser(cookies, headless, browserlessWSEndpoint);
         browser = browserObj.browser;
         const page = browserObj.page;
 
