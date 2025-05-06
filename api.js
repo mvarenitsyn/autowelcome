@@ -23,12 +23,12 @@ app.get('/', (req, res) => {
 // API endpoint to process new followers
 app.post('/api/process-followers', async (req, res) => {
     try {
-        const { cookieContent, username, welcomeMessage } = req.body;
+        const { cookieFilePath, username, welcomeMessage } = req.body;
 
-        if (!cookieContent) {
+        if (!cookieFilePath) {
             return res.status(400).json({
                 success: false,
-                message: 'Cookie content is required'
+                message: 'Cookie file path is required'
             });
         }
 
@@ -39,10 +39,6 @@ app.post('/api/process-followers', async (req, res) => {
             });
         }
 
-        // Create a temporary cookie file
-        const cookieFilePath = path.join(__dirname, `temp_cookie_${Date.now()}.json`);
-        fs.writeFileSync(cookieFilePath, JSON.stringify(cookieContent));
-
         // Process followers
         const result = await instagramBot.processFollowers({
             cookieFilePath,
@@ -50,11 +46,6 @@ app.post('/api/process-followers', async (req, res) => {
             welcomeMessage: welcomeMessage || process.env.WELCOME_MESSAGE || 'Thank you for following us!',
             headless: true // Default to headless mode
         });
-
-        // Clean up the temporary cookie file
-        if (fs.existsSync(cookieFilePath)) {
-            fs.unlinkSync(cookieFilePath);
-        }
 
         res.json({
             success: true,
