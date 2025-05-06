@@ -47,12 +47,43 @@ async function connectToMongoDB() {
 function loadCookies(cookieInput) {
     try {
         let cookiesString;
+
+        // Debug information
+        console.log('Cookie input type:', typeof cookieInput);
+
         if (Buffer.isBuffer(cookieInput)) {
+            // Handle direct buffer
             cookiesString = cookieInput.toString('utf8');
+            console.log('Processing as direct buffer');
         } else if (typeof cookieInput === 'string' && fs.existsSync(cookieInput)) {
+            // Handle direct file path
             cookiesString = fs.readFileSync(cookieInput, 'utf8');
-        } else if (typeof cookieInput === 'object' && cookieInput !== null && cookieInput.buffer) {
-            cookiesString = Buffer.from(cookieInput.buffer).toString('utf8');
+            console.log('Processing as file path');
+        } else if (typeof cookieInput === 'object' && cookieInput !== null) {
+            // Handle various object formats
+            console.log('Processing as object with keys:', Object.keys(cookieInput));
+
+            // Case 1: Object with buffer property
+            if (cookieInput.buffer) {
+                cookiesString = Buffer.from(cookieInput.buffer).toString('utf8');
+                console.log('Processing object with buffer property');
+            }
+            // Case 2: Multer file object (has path property and file exists)
+            else if (cookieInput.path && fs.existsSync(cookieInput.path)) {
+                cookiesString = fs.readFileSync(cookieInput.path, 'utf8');
+                console.log('Processing multer file object with path:', cookieInput.path);
+            }
+            // Case 3: Object is a multer file (test additional properties)
+            else if (cookieInput.fieldname === 'cookieFile' && cookieInput.originalname && cookieInput.path) {
+                if (fs.existsSync(cookieInput.path)) {
+                    cookiesString = fs.readFileSync(cookieInput.path, 'utf8');
+                    console.log('Processing multer upload with path:', cookieInput.path);
+                } else {
+                    throw new Error(`Multer file not found at path: ${cookieInput.path}`);
+                }
+            } else {
+                throw new Error('Invalid object structure for cookie input');
+            }
         } else {
             throw new Error('Invalid cookie input');
         }
