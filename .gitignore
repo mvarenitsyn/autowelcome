@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
 uploads/
+test_cookies.js
 package-lock.json
 
 # Environment variables

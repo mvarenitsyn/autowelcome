@@ -66,10 +66,11 @@ app.get('/', (req, res) => {
     res.send('Instagram Auto Welcome API running');
 });
 
-// API endpoint to process new followers (legacy synchronous version)
+// API endpoint to process new followers (supports both synchronous and asynchronous modes)
 app.post('/api/process-followers', upload.single('cookieFile'), async (req, res) => {
     try {
-        const { username, welcomeMessage, browserlessApiKey } = req.body;
+        const { username, welcomeMessage, browserlessApiKey, async } = req.body;
+        const isAsync = async === 'true' || async === true;
 
         // Check for cookie file upload
         if (!req.file) {
@@ -86,7 +87,27 @@ app.post('/api/process-followers', upload.single('cookieFile'), async (req, res)
             });
         }
 
-        // Process followers
+        // If async mode is requested, create job and return immediately
+        if (isAsync) {
+            // Create job
+            const jobId = instagramBot.startProcessFollowers({
+                cookieFile: req.file,
+                username,
+                welcomeMessage: welcomeMessage || process.env.WELCOME_MESSAGE || 'Thank you for following us!',
+                headless: true, // Default to headless mode
+                browserlessApiKey: browserlessApiKey || process.env.BROWSERLESS_API_KEY
+            }, jobManager);
+
+            // Return immediately with job ID
+            return res.json({
+                success: true,
+                jobId,
+                message: 'Job created successfully. Use the job ID to check status.',
+                async: true
+            });
+        }
+
+        // Process followers synchronously (original behavior)
         const result = await instagramBot.processFollowers({
             cookieFile: req.file,
             username,
@@ -101,7 +122,8 @@ app.post('/api/process-followers', upload.single('cookieFile'), async (req, res)
         res.json({
             success: true,
             processedUsers: result.processedUsers,
-            failedUsers: result.failedUsers
+            failedUsers: result.failedUsers,
+            async: false
         });
     } catch (error) {
         console.error('API Error:', error);

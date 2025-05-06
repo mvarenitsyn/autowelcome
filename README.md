@@ -55,8 +55,9 @@ This is a `multipart/form-data` request that accepts a cookie file upload.
 - `username`: (required) Your Instagram username
 - `welcomeMessage`: (optional) Custom welcome message
 - `browserlessApiKey`: (optional) Your browserless.io API key for cloud browser execution
+- `async`: (optional) Set to "true" to process followers asynchronously and return immediately with a job ID
 
-**Response**:
+**Synchronous Response** (when `async` is not set):
 ```json
 {
   "success": true,
@@ -67,25 +68,44 @@ This is a `multipart/form-data` request that accepts a cookie file upload.
       "timestamp": "2023-08-01T12:00:00.000Z"
     }
   ],
-  "failedUsers": []
+  "failedUsers": [],
+  "async": false
+}
+```
+
+**Asynchronous Response** (when `async` is set to "true"):
+```json
+{
+  "success": true,
+  "jobId": "abcdef123456789",
+  "message": "Job created successfully. Use the job ID to check status.",
+  "async": true
 }
 ```
 
 ### Example with cURL
 
 ```bash
-# Using cookie file upload
+# Synchronous processing (wait for completion)
 curl -X POST http://localhost:3000/api/process-followers \
   -F "cookieFile=@/path/to/your/cookies.json" \
   -F "username=your_instagram_username" \
   -F "welcomeMessage=Thank you for following me! I appreciate your support."
 
-# Using cookie file upload with browserless.io
+# Asynchronous processing (return immediately with job ID)
 curl -X POST http://localhost:3000/api/process-followers \
   -F "cookieFile=@/path/to/your/cookies.json" \
   -F "username=your_instagram_username" \
   -F "welcomeMessage=Thank you for following me!" \
-  -F "browserlessApiKey=your-browserless-api-key"
+  -F "async=true"
+
+# Using with browserless.io
+curl -X POST http://localhost:3000/api/process-followers \
+  -F "cookieFile=@/path/to/your/cookies.json" \
+  -F "username=your_instagram_username" \
+  -F "welcomeMessage=Thank you for following me!" \
+  -F "browserlessApiKey=your-browserless-api-key" \
+  -F "async=true"
 ```
 
 ### Cookie File Format
@@ -128,10 +148,64 @@ npm run dev
 
 ## Notes
 
+### Check Job Status
+
+**Endpoint**: `GET /api/jobs/:jobId`
+
+Use this endpoint to check the status of an asynchronous job.
+
+**URL Parameters**:
+- `jobId`: (required) The job ID returned from the asynchronous API call
+
+**Response**:
+```json
+{
+  "success": true,
+  "job": {
+    "id": "abcdef123456789",
+    "status": "completed",
+    "created": "2023-08-01T12:00:00.000Z",
+    "updated": "2023-08-01T12:05:00.000Z",
+    "completed": "2023-08-01T12:05:00.000Z",
+    "progress": {
+      "total": 5,
+      "processed": 5
+    },
+    "processedUsers": [
+      {
+        "username": "follower1",
+        "status": "success",
+        "timestamp": "2023-08-01T12:02:00.000Z"
+      }
+    ],
+    "failedUsers": [],
+    "message": null,
+    "error": null
+  }
+}
+```
+
+**Possible Job Statuses**:
+- `queued`: Job has been created but not yet started
+- `initializing`: Job is initializing (e.g., browser setup)
+- `initializing_browser`: Setting up the browser
+- `checking_notifications`: Checking Instagram notifications
+- `sending_messages`: Sending messages to followers
+- `reconnecting`: Reconnecting after a connection issue
+- `completed`: Job has completed successfully
+- `failed`: Job has failed with an error
+
+### Example Job Status Check with cURL
+
+```bash
+curl -X GET http://localhost:3000/api/jobs/abcdef123456789
+```
+
 - The API operates in headless mode by default for server environments
 - When using browserless.io, set your API key in the environment variables or pass it with each request
 - For optimal results, refresh your cookie file regularly as Instagram cookies expire
 - Files uploaded to the API are automatically deleted after processing for security
+- For processing many followers, the asynchronous mode is recommended to avoid timeouts
 
 ## Web Interface
 

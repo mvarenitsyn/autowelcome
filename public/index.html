@@ -110,6 +110,15 @@
                 placeholder="Thank you for following us! We appreciate your support."></textarea>
             <div class="note">If left empty, the default message from your server configuration will be used.</div>
 
+            <div style="margin-top: 15px;">
+                <input type="checkbox" id="asyncProcess" name="asyncProcess" value="true">
+                <label for="asyncProcess" style="display: inline-block; font-weight: normal;">
+                    Process asynchronously (recommended for many followers)
+                </label>
+                <div class="note">When enabled, the job will run in the background and you can check its status below.
+                </div>
+            </div>
+
             <button type="submit">Process Followers</button>
         </form>
 
@@ -118,6 +127,55 @@
     </div>
 
     <script>
+        // Function to check job status
+        async function checkJobStatus() {
+            const jobId = localStorage.getItem('currentJobId');
+            if (!jobId) {
+                alert('No job ID found. Please start a new job first.');
+                return;
+            }
+
+            const jobStatusEl = document.getElementById('jobStatus');
+            const jobResultEl = document.getElementById('jobResult');
+
+            jobStatusEl.textContent = 'Checking job status...';
+            jobStatusEl.className = 'status';
+            jobResultEl.style.display = 'none';
+
+            try {
+                const response = await fetch(`/api/jobs/${jobId}`);
+                const data = await response.json();
+
+                if (response.ok) {
+                    // Update job status display
+                    if (data.job.status === 'completed') {
+                        jobStatusEl.className = 'status success';
+                        jobStatusEl.textContent = `Job completed successfully. Processed ${data.job.processedUsers.length} followers, ${data.job.failedUsers.length} failed.`;
+                    } else if (data.job.status === 'failed') {
+                        jobStatusEl.className = 'status error';
+                        jobStatusEl.textContent = `Job failed: ${data.job.error || 'Unknown error'}`;
+                    } else {
+                        // Job still running
+                        jobStatusEl.textContent = `Job status: ${data.job.status}`;
+                        if (data.job.progress && data.job.progress.total > 0) {
+                            const percent = Math.round((data.job.progress.processed / data.job.progress.total) * 100);
+                            jobStatusEl.textContent += ` (${data.job.progress.processed}/${data.job.progress.total}, ${percent}% complete)`;
+                        }
+                    }
+
+                    // Display full job information
+                    jobResultEl.textContent = JSON.stringify(data.job, null, 2);
+                    jobResultEl.style.display = 'block';
+                } else {
+                    jobStatusEl.className = 'status error';
+                    jobStatusEl.textContent = `Error: ${data.message || 'Failed to fetch job status'}`;
+                }
+            } catch (error) {
+                jobStatusEl.className = 'status error';
+                jobStatusEl.textContent = `Error: ${error.message}`;
+            }
+        }
+
         document.getElementById('processForm').addEventListener('submit', async function (e) {
             e.preventDefault();
 
@@ -139,6 +197,7 @@
 
                 const username = document.getElementById('username').value;
                 const welcomeMessage = document.getElementById('welcomeMessage').value;
+                const isAsync = document.getElementById('asyncProcess').checked;
 
                 const response = await fetch('/api/process-followers', {
                     method: 'POST',
@@ -148,7 +207,8 @@
                     body: JSON.stringify({
                         cookieContent,
                         username,
-                        welcomeMessage: welcomeMessage || undefined // Only send if not empty
+                        welcomeMessage: welcomeMessage || undefined, // Only send if not empty
+                        async: isAsync
                     })
                 });
 
@@ -156,7 +216,47 @@
 
                 if (response.ok) {
                     statusEl.className = 'status success';
-                    statusEl.textContent = 'Success! Processed followers:';
+                    if (data.async) {
+                        // For async processing
+                        statusEl.textContent = 'Job created successfully! Job ID: ' + data.jobId;
+
+                        // Create job status check button and container if they don't exist
+                        if (!document.getElementById('jobStatusContainer')) {
+                            const jobContainer = document.createElement('div');
+                            jobContainer.id = 'jobStatusContainer';
+                            jobContainer.style.marginTop = '20px';
+
+                            const jobStatusHeader = document.createElement('h3');
+                            jobStatusHeader.textContent = 'Job Status';
+
+                            const jobStatusEl = document.createElement('div');
+                            jobStatusEl.id = 'jobStatus';
+                            jobStatusEl.className = 'status';
+
+                            const jobResultEl = document.createElement('pre');
+                            jobResultEl.id = 'jobResult';
+                            jobResultEl.style.display = 'none';
+
+                            const refreshButton = document.createElement('button');
+                            refreshButton.textContent = 'Check Status';
+                            refreshButton.id = 'checkJobStatus';
+                            refreshButton.onclick = checkJobStatus;
+
+                            jobContainer.appendChild(jobStatusHeader);
+                            jobContainer.appendChild(jobStatusEl);
+                            jobContainer.appendChild(jobResultEl);
+                            jobContainer.appendChild(refreshButton);
+
+                            // Insert after the result element
+                            resultEl.parentNode.insertBefore(jobContainer, resultEl.nextSibling);
+                        }
+
+                        // Store job ID for status checking
+                        localStorage.setItem('currentJobId', data.jobId);
+                    } else {
+                        // For synchronous processing
+                        statusEl.textContent = 'Success! Processed followers:';
+                    }
                 } else {
                     statusEl.className = 'status error';
                     statusEl.textContent = 'Error: ' + (data.message || 'Unknown error');

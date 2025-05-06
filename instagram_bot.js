@@ -51,8 +51,15 @@ function loadCookies(cookieInput) {
             cookiesString = cookieInput.toString('utf8');
         } else if (typeof cookieInput === 'string' && fs.existsSync(cookieInput)) {
             cookiesString = fs.readFileSync(cookieInput, 'utf8');
-        } else if (typeof cookieInput === 'object' && cookieInput !== null && cookieInput.buffer) {
-            cookiesString = Buffer.from(cookieInput.buffer).toString('utf8');
+        } else if (typeof cookieInput === 'object' && cookieInput !== null) {
+            // Handle multer file object
+            if (cookieInput.path && fs.existsSync(cookieInput.path)) {
+                cookiesString = fs.readFileSync(cookieInput.path, 'utf8');
+            } else if (cookieInput.buffer) {
+                cookiesString = Buffer.from(cookieInput.buffer).toString('utf8');
+            } else {
+                throw new Error('Invalid cookie input: Missing path or buffer');
+            }
         } else {
             throw new Error('Invalid cookie input');
         }
