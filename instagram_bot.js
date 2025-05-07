@@ -752,14 +752,23 @@ async function processFollowersJob(options, jobId, jobManager) {
     // Set up browserless.io endpoint if API key is provided
     let browserlessWSEndpoint = null;
     if (browserlessApiKey) {
-        // Use secure WebSocket connection with better error handling
-        browserlessWSEndpoint = `wss://chrome.browserless.io?token=${browserlessApiKey}&--disable-features=WebRtcHideLocalIpsWithMdns,AudioServiceOutOfProcess&stealth=true`;
-        console.log(`[Job ${jobId}] Using browserless.io service with enhanced parameters`);
+        try {
+            // Use secure WebSocket connection with better error handling
+            browserlessWSEndpoint = `wss://chrome.browserless.io?token=${browserlessApiKey}&--disable-features=WebRtcHideLocalIpsWithMdns,AudioServiceOutOfProcess&stealth=true`;
+            console.log(`[Job ${jobId}] Using browserless.io service with enhanced parameters`);
 
-        // Add a warning to the job for monitoring
-        jobManager.updateJobStatus(jobId, 'initializing', {
-            warning: 'Using remote browser service. Connection stability depends on network conditions.'
-        });
+            // Add a warning to the job for monitoring
+            jobManager.updateJobStatus(jobId, 'initializing', {
+                warning: 'Using remote browser service. Connection stability depends on network conditions.'
+            });
+        } catch (error) {
+            console.error(`[Job ${jobId}] Error setting up browserless endpoint:`, error);
+            jobManager.updateJobStatus(jobId, 'warning', {
+                warning: 'Failed to set up browserless.io service, falling back to local browser'
+            });
+            // Ensure browserlessWSEndpoint is null for fallback
+            browserlessWSEndpoint = null;
+        }
     }
 
     // Setup process-wide error handler for unhandled promise rejections
@@ -830,21 +839,42 @@ async function processFollowersJob(options, jobId, jobManager) {
 
         let browserObj;
         try {
-            browserObj = await initBrowser(cookies, headless, browserWSEndpoint);
+            // Pass browserlessWSEndpoint safely - will be null if not set up properly
+            browserObj = await initBrowser(cookies, headless, browserlessWSEndpoint);
             browser = browserObj.browser;
             const page = browserObj.page;
             console.log(`[Job ${jobId}] Browser successfully initialized`);
         } catch (browserError) {
             console.error(`[Job ${jobId}] Fatal browser initialization error:`, browserError);
-            jobManager.failJob(jobId, `Browser initialization failed: ${browserError.message}`);
 
-            // Specific handling for WebSocket errors
-            if (browserError.message.includes('socket hang up') ||
-                browserError.message.includes('ECONNRESET') ||
-                browserError.message.includes('Connection timeout')) {
-                throw new Error(`Remote browser connection failed - please try again later. Error: ${browserError.message}`);
+            // If the error is related to browserWSEndpoint, try again with local browser
+            if (browserlessWSEndpoint &&
+                (browserError.message.includes('browserWSEndpoint') ||
+                    browserError.message.includes('socket hang up') ||
+                    browserError.message.includes('ECONNRESET') ||
+                    browserError.message.includes('Connection timeout'))) {
+
+                console.log(`[Job ${jobId}] Retrying with local browser after remote browser error`);
+                jobManager.updateJobStatus(jobId, 'retrying_with_local', {
+                    warning: 'Remote browser connection failed, retrying with local browser'
+                });
+
+                try {
+                    // Try again without browserless
+                    browserObj = await initBrowser(cookies, headless, null);
+                    browser = browserObj.browser;
+                    const page = browserObj.page;
+                    console.log(`[Job ${jobId}] Browser successfully initialized with local browser`);
+                } catch (localBrowserError) {
+                    // If local browser also fails, then fail the job
+                    console.error(`[Job ${jobId}] Local browser initialization also failed:`, localBrowserError);
+                    jobManager.failJob(jobId, `Browser initialization failed: ${localBrowserError.message}`);
+                    throw localBrowserError;
+                }
+            } else {
+                jobManager.failJob(jobId, `Browser initialization failed: ${browserError.message}`);
+                throw browserError;
             }
-            throw browserError;
         }
 
         // Setup page and browser-level error handlers for better debugging

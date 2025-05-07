@@ -143,7 +143,15 @@
             jobResultEl.style.display = 'none';
 
             try {
-                const response = await fetch(`/api/jobs/${jobId}`);
+                // Use the same remote API for job status checks
+                const useRemoteApi = true; // Matches the form submission setting
+                const remoteApiUrl = 'https://web-production-2f3f0.up.railway.app';
+
+                const statusApiUrl = useRemoteApi
+                    ? `${remoteApiUrl}/api/jobs/${jobId}`
+                    : `/api/jobs/${jobId}`;
+
+                const response = await fetch(statusApiUrl);
                 const data = await response.json();
 
                 if (response.ok) {
@@ -199,17 +207,38 @@
                 const welcomeMessage = document.getElementById('welcomeMessage').value;
                 const isAsync = document.getElementById('asyncProcess').checked;
 
-                const response = await fetch('/api/process-followers', {
+                // Setup form data for multipart/form-data submission (required for file upload)
+                const formData = new FormData();
+
+                // Convert cookies back to a file
+                const cookieBlob = new Blob([JSON.stringify(cookieContent)], { type: 'application/json' });
+                formData.append('cookieFile', cookieBlob, 'cookies.json');
+
+                // Add other form fields
+                formData.append('username', username);
+                if (welcomeMessage) {
+                    formData.append('welcomeMessage', welcomeMessage);
+                }
+                formData.append('async', isAsync);
+
+                // Get browserless API key from environment or localStorage if available
+                const browserlessApiKey = localStorage.getItem('browserlessApiKey');
+                if (browserlessApiKey) {
+                    formData.append('browserlessApiKey', browserlessApiKey);
+                }
+
+                // Add a remote API option
+                const useRemoteApi = true; // Set to true to use the deployed API
+                const remoteApiUrl = 'https://web-production-2f3f0.up.railway.app';
+
+                // Use remote or local API based on the setting
+                const apiUrl = useRemoteApi
+                    ? `${remoteApiUrl}/api/process-followers`
+                    : '/api/process-followers';
+
+                const response = await fetch(apiUrl, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        cookieContent,
-                        username,
-                        welcomeMessage: welcomeMessage || undefined, // Only send if not empty
-                        async: isAsync
-                    })
+                    body: formData
                 });
 
                 const data = await response.json();
