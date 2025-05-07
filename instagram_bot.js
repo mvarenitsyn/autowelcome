@@ -106,6 +106,7 @@ async function initBrowser(cookiesObj, headless = true, browserWSEndpoint = null
 
             // Step 1: Launch or connect to browser with more robust error handling
             if (browserWSEndpoint) {
+                console.log(`Connecting to remote browser at ${browserWSEndpoint}`);
                 try {
                     // More robust browserWSEndpoint connection with timeout
                     const connectPromise = puppeteer.connect({
@@ -129,31 +130,32 @@ async function initBrowser(cookiesObj, headless = true, browserWSEndpoint = null
                     throw new Error(`Remote browser connection failed: ${connectError.message}`);
                 }
             } else {
-                // Local browser launch with improved options
+                // Local browser launch with simplified stable options
                 browser = await puppeteer.launch({
-                    headless: headless ? 'new' : false,
+                    // Use classic headless mode unless `headless` is explicitly false
+                    headless,
+                    // Allow an externally‑installed Chrome/Chromium if provided
+                    executablePath: process.env.CHROME_PATH || undefined,
                     args: [
                         '--no-sandbox',
                         '--disable-setuid-sandbox',
                         '--window-size=1280,800',
-                        '--disable-gpu',
-                        '--disable-dev-shm-usage',
-                        '--disable-accelerated-2d-canvas',
-                        '--no-first-run',
-                        '--no-zygote',
-                        '--disable-extensions',
-                        '--disable-features=site-per-process',
-                        '--enable-features=NetworkService,NetworkServiceInProcess',
-                        '--disable-web-security',
-                        '--disable-features=IsolateOrigins,site-per-process',
-                        // Additional args for better stability
-                        '--disable-background-timer-throttling',
-                        '--disable-backgrounding-occluded-windows',
-                        '--disable-renderer-backgrounding',
+                        // Commented‑out flags below have been removed because they can
+                        // crash Chrome or conflict with the DevTools websocket on macOS:
+                        // '--disable-gpu',
+                        // '--disable-dev-shm-usage',
+                        // '--disable-accelerated-2d-canvas',
+                        // '--disable-features=site-per-process',
+                        // '--enable-features=NetworkService,NetworkServiceInProcess',
+                        // '--disable-web-security',
+                        // '--disable-features=IsolateOrigins,site-per-process',
+                        // '--disable-background-timer-throttling',
+                        // '--disable-backgrounding-occluded-windows',
+                        // '--disable-renderer-backgrounding',
                     ],
                     defaultViewport: { width: 1280, height: 800 },
-                    timeout: 90000, // Increased timeout to 90 seconds
-                    ignoreHTTPSErrors: true // Ignore HTTPS errors
+                    timeout: 90000,
+                    ignoreHTTPSErrors: true,
                 });
             }
 
@@ -742,7 +744,7 @@ async function processFollowersJob(options, jobId, jobManager) {
         browserlessApiKey // browserless.io API key
     } = options;
 
-    let client, browser, collection = null;
+    let client, browser, page, collection = null;
     const processedUsers = [];
     const failedUsers = [];
 
@@ -842,7 +844,7 @@ async function processFollowersJob(options, jobId, jobManager) {
             // Pass browserlessWSEndpoint safely - will be null if not set up properly
             browserObj = await initBrowser(cookies, headless, browserlessWSEndpoint);
             browser = browserObj.browser;
-            const page = browserObj.page;
+            page = browserObj.page;
             console.log(`[Job ${jobId}] Browser successfully initialized`);
         } catch (browserError) {
             console.error(`[Job ${jobId}] Fatal browser initialization error:`, browserError);
@@ -863,7 +865,7 @@ async function processFollowersJob(options, jobId, jobManager) {
                     // Try again without browserless
                     browserObj = await initBrowser(cookies, headless, null);
                     browser = browserObj.browser;
-                    const page = browserObj.page;
+                    page = browserObj.page;
                     console.log(`[Job ${jobId}] Browser successfully initialized with local browser`);
                 } catch (localBrowserError) {
                     // If local browser also fails, then fail the job
@@ -971,8 +973,7 @@ async function processFollowersJob(options, jobId, jobManager) {
                     // Attempt to reinitialize browser
                     const newBrowserObj = await initBrowser(cookies, headless, browserWSEndpoint);
                     browser = newBrowserObj.browser;
-                    // Make sure to declare a new page variable - don't reuse the outer scope one
-                    const newPage = newBrowserObj.page;
+                    page = newBrowserObj.page;
                     console.log(`[Job ${jobId}] Successfully reconnected to browser`);
 
                     // Update job status back to sending messages
@@ -983,7 +984,7 @@ async function processFollowersJob(options, jobId, jobManager) {
                     // Use the new page for the current follower
                     try {
                         // Send message with timeout to prevent hanging
-                        const messagePromise = sendWelcomeMessage(newPage, username, welcomeMessage);
+                        const messagePromise = sendWelcomeMessage(page, username, welcomeMessage);
                         const timeoutPromise = new Promise((_, reject) =>
                             setTimeout(() => reject(new Error('Message sending timeout')), 120000)
                         );
@@ -1002,6 +1003,8 @@ async function processFollowersJob(options, jobId, jobManager) {
                             jobManager.addProcessedUser(jobId, userData);
                             lastProcessedIndex = i;
                         } else {
+                            // Mark skipped user as processed so we don't retry next run
+                            await markUserAsProcessed(collection, username, accountOwner);
                             console.log(`[Job ${jobId}] Failed to message ${username} after reconnection, skipping this user`);
                             const userData = {
                                 username,
@@ -1025,7 +1028,8 @@ async function processFollowersJob(options, jobId, jobManager) {
                         };
                         failedUsers.push(userData);
                         jobManager.addFailedUser(jobId, userData);
-
+                        // Ensure user is marked processed even when an error occurs
+                        await markUserAsProcessed(collection, username, accountOwner);
                         // Continue to next user
                         continue;
                     }
@@ -1063,6 +1067,8 @@ async function processFollowersJob(options, jobId, jobManager) {
                     jobManager.addProcessedUser(jobId, userData);
                     lastProcessedIndex = i;
                 } else {
+                    // Mark skipped user as processed so we don't retry next run
+                    await markUserAsProcessed(collection, username, accountOwner);
                     console.log(`[Job ${jobId}] Failed to message ${username}, skipping this user`);
                     const userData = {
                         username,
@@ -1084,6 +1090,7 @@ async function processFollowersJob(options, jobId, jobManager) {
                 };
                 failedUsers.push(userData);
                 jobManager.addFailedUser(jobId, userData);
+                await markUserAsProcessed(collection, username, accountOwner);
 
                 // Check if it's a connection error - if so, we might need to reconnect
                 if (messageError.message.includes('socket hang up') ||
@@ -1270,6 +1277,8 @@ async function processFollowers(options) {
                         timestamp: new Date().toISOString()
                     });
                 } else {
+                    // Mark skipped user as processed so we don't retry next run
+                    await markUserAsProcessed(collection, username, accountOwner);
                     console.log(`Failed to message ${username}, skipping this user`);
                     failedUsers.push({
                         username,
@@ -1285,6 +1294,7 @@ async function processFollowers(options) {
                     error: messageError.message,
                     timestamp: new Date().toISOString()
                 });
+                await markUserAsProcessed(collection, username, accountOwner);
             }
 
             // Add a delay between messages to avoid rate limiting
