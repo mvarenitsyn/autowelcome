@@ -971,13 +971,64 @@ async function processFollowersJob(options, jobId, jobManager) {
                     // Attempt to reinitialize browser
                     const newBrowserObj = await initBrowser(cookies, headless, browserWSEndpoint);
                     browser = newBrowserObj.browser;
-                    page = newBrowserObj.page;
+                    // Make sure to declare a new page variable - don't reuse the outer scope one
+                    const newPage = newBrowserObj.page;
                     console.log(`[Job ${jobId}] Successfully reconnected to browser`);
 
                     // Update job status back to sending messages
                     jobManager.updateJobStatus(jobId, 'sending_messages', {
                         info: 'Reconnected successfully, continuing message sending'
                     });
+
+                    // Use the new page for the current follower
+                    try {
+                        // Send message with timeout to prevent hanging
+                        const messagePromise = sendWelcomeMessage(newPage, username, welcomeMessage);
+                        const timeoutPromise = new Promise((_, reject) =>
+                            setTimeout(() => reject(new Error('Message sending timeout')), 120000)
+                        );
+
+                        // Race the operation against timeout
+                        const success = await Promise.race([messagePromise, timeoutPromise]);
+
+                        if (success) {
+                            await markUserAsProcessed(collection, username, accountOwner);
+                            const userData = {
+                                username,
+                                status: 'success',
+                                timestamp: new Date().toISOString()
+                            };
+                            processedUsers.push(userData);
+                            jobManager.addProcessedUser(jobId, userData);
+                            lastProcessedIndex = i;
+                        } else {
+                            console.log(`[Job ${jobId}] Failed to message ${username} after reconnection, skipping this user`);
+                            const userData = {
+                                username,
+                                status: 'failed',
+                                timestamp: new Date().toISOString(),
+                                reason: 'Message sending failed after reconnection'
+                            };
+                            failedUsers.push(userData);
+                            jobManager.addFailedUser(jobId, userData);
+                        }
+
+                        // Continue to next user after handling this one
+                        continue;
+                    } catch (msgError) {
+                        console.error(`[Job ${jobId}] Error messaging ${username} after reconnection:`, msgError);
+                        const userData = {
+                            username,
+                            status: 'failed',
+                            timestamp: new Date().toISOString(),
+                            error: msgError.message
+                        };
+                        failedUsers.push(userData);
+                        jobManager.addFailedUser(jobId, userData);
+
+                        // Continue to next user
+                        continue;
+                    }
                 } catch (reconnectError) {
                     console.error(`[Job ${jobId}] Failed to reconnect to browser:`, reconnectError);
 

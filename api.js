@@ -89,13 +89,21 @@ app.post('/api/process-followers', upload.single('cookieFile'), async (req, res)
 
         // If async mode is requested, create job and return immediately
         if (isAsync) {
-            // Create job
+            // Check if we should use browserless (if available)
+            const useBrowserless = req.body.useBrowserless === 'true';
+
+            // Get browserless API key, but only if we want to use it
+            const apiKey = useBrowserless ?
+                (browserlessApiKey || process.env.BROWSERLESS_API_KEY) :
+                null;
+
+            // Create job with or without browserless based on the setting
             const jobId = instagramBot.startProcessFollowers({
                 cookieFile: req.file,
                 username,
                 welcomeMessage: welcomeMessage || process.env.WELCOME_MESSAGE || 'Thank you for following us!',
                 headless: true, // Default to headless mode
-                browserlessApiKey: browserlessApiKey || process.env.BROWSERLESS_API_KEY
+                browserlessApiKey: apiKey // Will be null if useBrowserless is false
             }, jobManager);
 
             // Return immediately with job ID

@@ -119,6 +119,16 @@
                 </div>
             </div>
 
+            <div style="margin-top: 15px;">
+                <input type="checkbox" id="useBrowserless" name="useBrowserless" value="true">
+                <label for="useBrowserless" style="display: inline-block; font-weight: normal;">
+                    Use remote browser with browserless.io
+                </label>
+                <div class="note">When enabled, the job will use a cloud browser. If disabled, the local browser will be
+                    used.
+                </div>
+            </div>
+
             <button type="submit">Process Followers</button>
         </form>
 
@@ -227,9 +237,15 @@
                     formData.append('browserlessApiKey', browserlessApiKey);
                 }
 
-                // Add a remote API option
+                // Add options for API and browser selections
                 const useRemoteApi = true; // Set to true to use the deployed API
                 const remoteApiUrl = 'https://web-production-2f3f0.up.railway.app';
+
+                // Get user's preference for browserless
+                const useBrowserlessRemote = document.getElementById('useBrowserless').checked;
+
+                // Add browserless flag to the form data based on checkbox
+                formData.append('useBrowserless', useBrowserlessRemote ? 'true' : 'false');
 
                 // Use remote or local API based on the setting
                 const apiUrl = useRemoteApi

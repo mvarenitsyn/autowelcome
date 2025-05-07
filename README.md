@@ -206,6 +206,10 @@ curl -X GET http://localhost:3000/api/jobs/abcdef123456789
 - For optimal results, refresh your cookie file regularly as Instagram cookies expire
 - Files uploaded to the API are automatically deleted after processing for security
 - For processing many followers, the asynchronous mode is recommended to avoid timeouts
+- Asynchronous mode works with both local and remote browsers:
+  - Set `useBrowserless=false` in the form data to force using the local browser in async mode
+  - When browserless.io is not used, the async job will run on the server's local browser
+  - This gives you flexibility to choose between scale (remote) and privacy (local)
 
 ## Web Interface
 
