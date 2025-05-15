@@ -83,6 +83,39 @@ This is a `multipart/form-data` request that accepts a cookie file upload.
 }
 ```
 
+### Send a Custom Message to a Specific User
+
+**Endpoint**: `POST /api/send-message`
+
+This endpoint allows you to send a custom message to any Instagram user using your cookies. It supports synchronous and asynchronous (background job) modes, as well as browserless.io remote browser execution.
+
+**Form Parameters**:
+- `cookieFile`: (required) JSON file containing Instagram cookies
+- `username`: (required) Instagram username to send the message to
+- `message`: (required) The message to send
+- `useBrowserless`: (optional) Set to "true" to use browserless.io remote browser
+- `browserlessApiKey`: (optional) Your browserless.io API key
+- `headless`: (optional) Set to "false" to see the browser window (default is true)
+- `async`: (optional) Set to "true" to process the message sending as a background job
+
+**Synchronous Response** (when `async` is not set):
+```json
+{
+  "success": true,
+  "message": "Message sent successfully"
+}
+```
+
+**Asynchronous Response** (when `async` is set to "true"):
+```json
+{
+  "success": true,
+  "jobId": "abcdef123456789",
+  "message": "Job created successfully. Use the job ID to check status.",
+  "async": true
+}
+```
+
 ### Example with cURL
 
 ```bash
@@ -106,6 +139,78 @@ curl -X POST http://localhost:3000/api/process-followers \
   -F "welcomeMessage=Thank you for following me!" \
   -F "browserlessApiKey=your-browserless-api-key" \
   -F "async=true"
+
+# Send a custom message to a specific user
+curl -X POST http://localhost:3000/api/send-message \
+  -F "cookieFile=@/path/to/your/cookies.json" \
+  -F "username=target_username" \
+  -F "message=Hello from the API!"
+
+# Asynchronous message sending (background job)
+curl -X POST http://localhost:3000/api/send-message \
+  -F "cookieFile=@/path/to/your/cookies.json" \
+  -F "username=target_username" \
+  -F "message=Hello from the API!" \
+  -F "async=true"
+
+# Using browserless.io for message sending
+curl -X POST http://localhost:3000/api/send-message \
+  -F "cookieFile=@/path/to/your/cookies.json" \
+  -F "username=target_username" \
+  -F "message=Hello from the API!" \
+  -F "useBrowserless=true" \
+  -F "browserlessApiKey=your-browserless-api-key"
+```
+
+### Example with JavaScript (Node.js)
+
+#### Process New Followers
+```js
+const axios = require('axios');
+const FormData = require('form-data');
+const fs = require('fs');
+
+const form = new FormData();
+form.append('cookieFile', fs.createReadStream('./igcookie.json'));
+form.append('username', 'your_instagram_username');
+form.append('welcomeMessage', 'Thank you for following!');
+// form.append('async', 'true'); // Uncomment for async
+// form.append('useBrowserless', 'true'); // Uncomment for browserless.io
+// form.append('browserlessApiKey', 'your-browserless-api-key');
+
+axios.post('http://localhost:3003/api/process-followers', form, {
+  headers: form.getHeaders()
+}).then(res => {
+  console.log(res.data);
+}).catch(err => {
+  if (err.response) console.error(err.response.data);
+  else console.error(err);
+});
+```
+
+#### Send a Custom Message to a Specific User
+```js
+const axios = require('axios');
+const FormData = require('form-data');
+const fs = require('fs');
+
+const form = new FormData();
+form.append('cookieFile', fs.createReadStream('./igcookie.json'));
+form.append('username', 'target_username');
+form.append('message', 'Hello from the API!');
+// form.append('async', 'true'); // Uncomment for async
+// form.append('useBrowserless', 'true'); // Uncomment for browserless.io
+// form.append('browserlessApiKey', 'your-browserless-api-key');
+// form.append('headless', 'false'); // Uncomment to see browser window
+
+axios.post('http://localhost:3003/api/send-message', form, {
+  headers: form.getHeaders()
+}).then(res => {
+  console.log(res.data);
+}).catch(err => {
+  if (err.response) console.error(err.response.data);
+  else console.error(err);
+});
 ```
 
 ### Cookie File Format
@@ -210,6 +315,10 @@ curl -X GET http://localhost:3000/api/jobs/abcdef123456789
   - Set `useBrowserless=false` in the form data to force using the local browser in async mode
   - When browserless.io is not used, the async job will run on the server's local browser
   - This gives you flexibility to choose between scale (remote) and privacy (local)
+
+## Limitations
+
+- Job status and progress are stored in memory. If the server restarts, all job data is lost. For production, consider using a persistent job store.
 
 ## Web Interface
 

@@ -11,7 +11,7 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3003;
 
 // Set up multer for file uploads
 const upload = multer({
@@ -105,6 +105,15 @@ app.post('/api/process-followers', upload.single('cookieFile'), async (req, res)
                 headless: true, // Default to headless mode
                 browserlessApiKey: apiKey // Will be null if useBrowserless is false
             }, jobManager);
+
+            // Schedule file deletion after 5 minutes for async jobs
+            setTimeout(() => {
+                if (req.file && req.file.path) {
+                    fs.unlink(req.file.path, err => {
+                        if (err) console.error('Error deleting async upload:', err);
+                    });
+                }
+            }, 5 * 60 * 1000);
 
             // Return immediately with job ID
             return res.json({
@@ -223,6 +232,84 @@ app.get('/api/jobs/:jobId', (req, res) => {
             message: 'An error occurred while fetching job status',
             error: error.message
         });
+    }
+});
+
+// Enhanced endpoint: send a custom message to a specific user (supports browserless.io, headless, async)
+app.post('/api/send-message', upload.single('cookieFile'), async (req, res) => {
+    try {
+        const { username, message, browserlessApiKey, useBrowserless, headless, async: asyncFlag } = req.body;
+        const isAsync = asyncFlag === 'true' || asyncFlag === true;
+        const useRemote = useBrowserless === 'true' || useBrowserless === true;
+        const headlessMode = headless === 'false' ? false : true;
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: 'Cookie file upload is required' });
+        }
+        if (!username || !message) {
+            return res.status(400).json({ success: false, message: 'Username and message are required' });
+        }
+        const { loadCookies, initBrowser, sendWelcomeMessage } = require('./instagram_bot');
+        // Load cookies
+        const cookies = loadCookies(req.file);
+        // Browserless endpoint if needed
+        let browserlessWSEndpoint = null;
+        let apiKey = null;
+        if (useRemote) {
+            apiKey = browserlessApiKey || process.env.BROWSERLESS_API_KEY;
+            if (apiKey) {
+                browserlessWSEndpoint = `wss://chrome.browserless.io?token=${apiKey}&--disable-features=WebRtcHideLocalIpsWithMdns,AudioServiceOutOfProcess&stealth=true`;
+            }
+        }
+        // Async/background job support
+        if (isAsync) {
+            const jobId = require('./job_manager').createJob({ username, message, browserlessApiKey, useBrowserless, headless: headlessMode, cookieFile: req.file });
+            (async () => {
+                let browser = null;
+                try {
+                    const { browser, page } = await initBrowser(cookies, headlessMode, browserlessWSEndpoint);
+                    await page.goto('https://www.instagram.com/', { timeout: 90000 });
+                    const isLoggedIn = await page.evaluate(() => !document.querySelector('input[name="username"]'));
+                    if (!isLoggedIn) throw new Error('Authentication failed - please check your cookie file');
+                    const success = await sendWelcomeMessage(page, username, message);
+                    if (success) {
+                        require('./job_manager').updateJobStatus(jobId, 'completed', { message: 'Message sent successfully' });
+                    } else {
+                        require('./job_manager').failJob(jobId, 'Failed to send message');
+                    }
+                } catch (err) {
+                    require('./job_manager').failJob(jobId, err.message || String(err));
+                } finally {
+                    if (browser) try { await browser.close(); } catch (e) { }
+                    if (req.file && req.file.path) { try { require('fs').unlinkSync(req.file.path); } catch (e) { } }
+                }
+            })();
+            return res.json({ success: true, jobId, message: 'Job created successfully. Use the job ID to check status.', async: true });
+        }
+        // Synchronous processing
+        let browser, page;
+        let success = false;
+        let error = null;
+        try {
+            const browserObj = await initBrowser(cookies, headlessMode, browserlessWSEndpoint);
+            browser = browserObj.browser;
+            page = browserObj.page;
+            await page.goto('https://www.instagram.com/', { timeout: 90000 });
+            const isLoggedIn = await page.evaluate(() => !document.querySelector('input[name="username"]'));
+            if (!isLoggedIn) throw new Error('Authentication failed - please check your cookie file');
+            success = await sendWelcomeMessage(page, username, message);
+        } catch (err) {
+            error = err.message || String(err);
+        } finally {
+            if (browser) try { await browser.close(); } catch (e) { }
+        }
+        if (req.file && req.file.path) { try { require('fs').unlinkSync(req.file.path); } catch (e) { } }
+        if (success) {
+            return res.json({ success: true, message: 'Message sent successfully' });
+        } else {
+            return res.status(500).json({ success: false, message: error || 'Failed to send message' });
+        }
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
     }
 });
 

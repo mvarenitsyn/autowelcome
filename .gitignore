@@ -61,3 +61,7 @@ Desktop.ini
 .vscode
 *.sublime-project
 *.sublime-workspace
+
+#test files
+testrun.js
+testsendmessage.js
